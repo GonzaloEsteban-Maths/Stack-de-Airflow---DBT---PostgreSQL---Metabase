@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: stg_ventas
+    description: "Vista de staging: raw.ventas limpio y con nombres consistentes."
+    columns:
+      - name: venta_id
+        description: "PK de la venta."
+        data_tests:
+          - unique
+          - not_null
+      - name: venta_uuid
+        data_tests:
+          - unique
+          - not_null
+      - name: total
+        data_tests:
+          - not_null

@@ -1,0 +1,25 @@
+name: pipeline_ventas
+version: "1.0.0"
+config-version: 2
+
+profile: pipeline_ventas
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+
+target-path: "target"
+log-path: "logs"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  pipeline_ventas:
+    staging:
+      +materialized: view
+      +schema: staging
+    marts:
+      +materialized: table
+      +schema: marts

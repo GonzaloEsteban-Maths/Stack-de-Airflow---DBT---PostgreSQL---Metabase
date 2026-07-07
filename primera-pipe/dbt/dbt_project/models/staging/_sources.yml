@@ -1,0 +1,18 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    description: "Datos crudos insertados por el contenedor ingestor, sin transformar."
+    tables:
+      - name: ventas
+        description: "Una fila por venta, tal como la inserta el ingestor (Job 1 y Job 2)."
+        columns:
+          - name: id
+            description: "PK autoincremental."
+          - name: uuid
+            description: "Identificador unico de la venta generado por el ingestor."
+          - name: creado_en
+            description: "Momento de la venta (dato de negocio)."
+          - name: ingerido_en
+            description: "Momento en que se inserto la fila en raw (dato tecnico)."

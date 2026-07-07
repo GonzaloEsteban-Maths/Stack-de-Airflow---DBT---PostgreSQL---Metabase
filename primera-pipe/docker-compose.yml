@@ -1,0 +1,153 @@
+name: ingesta-stack
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: ingesta-postgres
+    env_file: .env
+    ports:
+      - "${POSTGRES_PORT_HOST}:${POSTGRES_PORT}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - datanet
+
+  # Imagen de tareas: NO es un servicio permanente.
+  # - Al hacer 'up' ejecuta el CMD por defecto (ingesta inicial) una vez y termina.
+  # - El job de lotes se lanza bajo demanda:
+  #     docker compose run --rm ingestor python -m app.batch_load
+  #   (esto es exactamente lo que hara Airflow contra la imagen 'ingesta-ingestor')
+  ingestor:
+    build: ./ingestor
+    image: ingesta-ingestor
+    container_name: ingesta-ingestor
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - datanet
+
+  adminer:
+    image: adminer:latest
+    container_name: ingesta-adminer
+    ports:
+      - "${ADMINER_PORT_HOST}:8080"
+    depends_on:
+      - postgres
+    networks:
+      - datanet
+  dbt:
+    build: ./dbt
+    image: ingesta-dbt
+    container_name: ingesta-dbt
+    env_file: .env
+    ports:
+      - "${DBT_PORT_HOST}:8080"
+    volumes:
+      - dbt_target:/usr/app/dbt_project/target
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - datanet
+
+  # Metadatos + programador del DAG. Cada tarea (BashOperator) hace un
+  # 'docker run' contra las imagenes 'ingesta-ingestor' e 'ingesta-dbt',
+  # igual que se hacia a mano. Corre como root porque necesita escribir
+  # en /var/run/docker.sock.
+  airflow-scheduler:
+    build: ./airflow
+    image: ingesta-airflow
+    container_name: ingesta-airflow-scheduler
+    user: "0:0"
+    env_file: .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT}/${AIRFLOW_DB}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+      _AIRFLOW_WWW_USER_EMAIL: ${AIRFLOW_ADMIN_EMAIL}
+    entrypoint: ["/entrypoint-scheduler.sh"]
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - airflow_logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./.env:/opt/airflow/project.env:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /opt/airflow/.initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - datanet
+
+  # UI de Airflow. Espera a que el scheduler termine la migracion del
+  # metastore (healthcheck) antes de arrancar.
+  airflow-webserver:
+    build: ./airflow
+    image: ingesta-airflow
+    container_name: ingesta-airflow-webserver
+    user: "0:0"
+    env_file: .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT}/${AIRFLOW_DB}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+    command: webserver
+    ports:
+      - "${AIRFLOW_PORT_HOST}:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - airflow_logs:/opt/airflow/logs
+    depends_on:
+      airflow-scheduler:
+        condition: service_healthy
+    networks:
+      - datanet
+
+  # BI / dashboards. Usa Postgres como metastore (base separada metabase_db).
+  # El dashboard en si lo arma el usuario a mano desde la UI.
+  metabase:
+    image: metabase/metabase:latest
+    container_name: ingesta-metabase
+    env_file: .env
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: metabase_db
+      MB_DB_HOST: postgres
+      MB_DB_PORT: ${POSTGRES_PORT}
+      MB_DB_USER: ${POSTGRES_USER}
+      MB_DB_PASS: ${POSTGRES_PASSWORD}
+    ports:
+      - "${METABASE_PORT_HOST}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - datanet
+
+volumes:
+  postgres_data:
+  dbt_target:
+  airflow_logs:
+
+networks:
+  datanet:
+    name: datanet
+    driver: bridge
+
