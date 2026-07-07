@@ -138,17 +138,6 @@ docker exec pipeline_ingest python initial_load.py
 docker compose run --rm dbt dbt build
 ```
 
-### Accesos
-
-| Herramienta | URL |
-|-------------|-----|
-| Airflow | http://localhost:8080 |
-| Adminer | http://localhost:8082 |
-| dbt docs | http://localhost:8081 |
-| Metabase | http://localhost:3000 |
-
----
-
 ## 🎓 Contexto
 
 Material didáctico del certificado de profesionalidad **IFCD0077**. El objetivo es que el alumnado toque de primera mano un pipeline ELT real de principio a fin: contenedores, esquemas, modelado en dbt, orquestación con Airflow y explotación en un dashboard de BI, todo articulado sobre una arquitectura Medallion.
